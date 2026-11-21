@@ -16,14 +16,14 @@ Demo mode is on by default. Copy the example environment file as described below
 
 ## Configure live models
 
-Copy `.env.example` to `.env` with `Copy-Item .env.example .env` in PowerShell or `cp .env.example .env` on macOS/Linux. Set `DEMO_MODE=false`, paste your OpenAI-compatible API base URL and key into `ADAPTION_BASE_URL` and `ADAPTION_API_KEY`, then fill in the provider's exact model IDs.
+Copy `.env.example` to `.env` with `Copy-Item .env.example .env` in PowerShell or `cp .env.example .env` on macOS/Linux. To use Adaption, set `DEMO_MODE=false` and fill in `ADAPTION_API_KEY`. The example includes Adaption’s OpenAI-compatible base URL and the two model IDs. Change the base URL and IDs in `.env` to use a different compatible provider.
 
-| Environment variable | Model in your picker | Rate in the screenshot |
-| --- | --- | ---: |
-| `CHEAP_MODEL` | DeepSeek V4 Flash | 0.14 credits per million tokens |
-| `STRONG_MODEL` | GLM 5.2 | 4.40 credits per million tokens |
+| Environment variable | Model ID | Input credits / 1M | Output credits / 1M |
+| --- | --- | ---: | ---: |
+| `CHEAP_MODEL` | `deepseek-v4-flash` | 0.045 | 0.14 |
+| `STRONG_MODEL` | `glm-5.2` | 1.40 | 4.40 |
 
-The example prices apply the displayed rate to both input and output. Set the four `*_PRICE_PER_1M` variables to your actual rates if they differ. Streamlit displays provider-reported usage when available. Demo token counts are estimates, demo cost is simulated, and demo latency measures local execution.
+The example uses Adaption's [standard token prices](https://docs.adaptionlabs.ai/inference-stacks/models/#pricing). Estimated cost uses the standard input price before any cache discount. Set the four `*_PRICE_PER_1M` variables to your actual rates if they differ. Streamlit displays provider-reported usage when available. Demo token counts are estimates, demo cost is simulated, and demo latency measures local execution.
 
 ## Architecture
 
