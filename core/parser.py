@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 from core.llm import LLM, LLMError
-from core.schema import RULE_FORMAT, Rule, VLANS
+from core.schema import RULE_FORMAT, Rule, VLANS, strict_json
 
 SERVICES = {
     "dns": 53, "https": 443, "erp": 443, "moodle": 443, "smb": 445,
@@ -47,13 +47,11 @@ def _demo_rule(text: str) -> dict:
         ports, proto = service(" ".join(filter(None, (leading, trailing))))
         parsed_exceptions = []
         for item in exceptions:
-            part = re.fullmatch(r"(?:(.+?)\s+)?(?:to\s+)?(\S+)(?:\s+(.+))?", item)
+            part = re.fullmatch(r"(?:to\s+)?(\S+)(?:\s+(.+))?", item)
             if not part:
                 raise ValueError("Use 'except to destination on TCP 443'.")
-            before, target, after = part.groups()
-            if before == "to":
-                before = None
-            exception_ports, exception_proto = service(" ".join(filter(None, (before, after))))
+            target, services = part.groups()
+            exception_ports, exception_proto = service(services or "")
             parsed_exceptions.append({"dst": target, "ports": exception_ports, "proto": exception_proto})
         return Rule.from_dict({
             "action": "block" if action in {"block", "deny"} else "allow",
@@ -67,8 +65,6 @@ def _demo_rule(text: str) -> dict:
 
 def parse_rule(text: str, llm: LLM) -> Rule:
     """Parse structured JSON locally or retry the cheap model once on invalid output."""
-    from core.schema import strict_json
-
     text = text.strip()
     if not text:
         raise ValueError("Enter a firewall rule.")
