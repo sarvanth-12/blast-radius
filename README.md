@@ -12,7 +12,7 @@ python data/generate_flows.py
 python -m streamlit run app.py
 ```
 
-Demo mode is on by default. The generator writes 20,000 synthetic records to `data/flows.csv`. The sidebar lets you select another CSV in `data/` or upload one.
+Demo mode is on by default. Copy the example environment file as described below to see simulated costs at the example rates. The generator writes 20,000 synthetic records to `data/flows.csv`. The sidebar lets you select another CSV in `data/` or upload one.
 
 ## Configure live models
 
