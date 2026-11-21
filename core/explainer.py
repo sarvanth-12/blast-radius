@@ -96,7 +96,7 @@ def explain(rule: Rule, result: ReplayResult, llm: LLM) -> Explanation:
     try:
         raw = llm.complete(
             "strong", SYSTEM, json.dumps({"rule": rule.to_dict(), "would_break": rows}, ensure_ascii=False),
-            lambda: _offline(rows, rule),
+            lambda: _offline(rows, rule), flow_rows=len(rows),
         )
         payload, candidate = _decode(raw, set(groups.id))
     except (LLMError, ValueError) as exc:
