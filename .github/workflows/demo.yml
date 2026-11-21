@@ -1,0 +1,36 @@
+name: Demo smoke test
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    env:
+      DEMO_MODE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python data/generate_flows.py
+      - run: python -m pytest -q
+      - run: python benchmark.py
+      - name: Exercise the Streamlit demo
+        run: |
+          python - <<'PY'
+          from streamlit.testing.v1 import AppTest
+
+          app = AppTest.from_file("app.py", default_timeout=20).run()
+          assert not app.exception
+          next(button for button in app.button if button.label == "Analyze").click().run()
+          assert not app.exception, app.exception
+          assert not app.error, app.error
+          before = app.session_state.analysis["result"].summary
+          assert before["flows_checked"] == 20_000 and before["would_break"] > 0
+          next(button for button in app.button if button.label == "Re-run with safer rule").click().run()
+          assert not app.exception, app.exception
+          after = app.session_state.analysis["after"]
+          assert after["would_break"] == 0 and after["intended_blocked"] == before["intended_blocked"]
+          PY
