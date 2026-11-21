@@ -30,6 +30,7 @@ class Call:
     latency_ms: float
     estimated_cost: float | None
     status: str
+    flow_rows_in_request: int
 
 
 class LLM:
@@ -53,15 +54,19 @@ class LLM:
             raise LLMError("Token prices must be nonnegative numbers.")
         return price
 
-    def complete(self, tier: Tier, system: str, prompt: str, canned: Callable[[], dict]) -> str:
+    def complete(
+        self, tier: Tier, system: str, prompt: str, canned: Callable[[], dict], *, flow_rows: int = 0,
+    ) -> str:
         """Run a JSON completion, or generate the deterministic demo equivalent."""
         start = perf_counter()
         model = os.getenv(f"{tier.upper()}_MODEL", "").strip()
         model_label = model or ("demo / " + tier if self.demo else "(unconfigured)")
         prompt_tokens = completion_tokens = cost = None
         status = "error"
+        counted_rows = 0
         try:
             if self.demo:
+                counted_rows = flow_rows
                 result = json.dumps(canned(), ensure_ascii=False)
                 prompt_tokens = math.ceil(len((system + prompt).encode("utf-8")) / 4)
                 completion_tokens = math.ceil(len(result.encode("utf-8")) / 4)
@@ -77,6 +82,7 @@ class LLM:
             if self.client is None:
                 from openai import OpenAI
                 self.client = OpenAI(base_url=base_url, api_key=key, timeout=90.0, max_retries=0)
+            counted_rows = flow_rows
             reply = self.client.chat.completions.create(
                 model=model, temperature=0,
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
@@ -99,7 +105,7 @@ class LLM:
             detail = f", HTTP {http_status}" if http_status else ""
             raise LLMError(f"{tier.capitalize()} model call failed ({type(exc).__name__}{detail}).") from exc
         finally:
-            record = Call(model_label, prompt_tokens, completion_tokens, (perf_counter() - start) * 1000, cost, status)
+            record = Call(model_label, prompt_tokens, completion_tokens, (perf_counter() - start) * 1000, cost, status, counted_rows)
             self.calls.append(record)
             logger.info("llm_usage %s", json.dumps(asdict(record)))
 
@@ -111,6 +117,7 @@ class LLM:
 
         return {
             "llm_calls": len(self.calls),
+            "flow_rows_in_request": total("flow_rows_in_request"),
             "prompt_tokens": total("prompt_tokens"),
             "completion_tokens": total("completion_tokens"),
             "llm_latency_ms": total("latency_ms"),
