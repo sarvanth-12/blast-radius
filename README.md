@@ -4,15 +4,25 @@ Replay a proposed firewall rule against recent network flows. See which observed
 
 ## Run locally
 
-Use Python 3.11. From the project folder, install the dependencies and launch the demo:
+Use Python 3.11. From the project folder, create an isolated environment and install the dependencies. On Windows PowerShell:
 
-```sh
-python -m pip install -r requirements.txt
-python data/generate_flows.py
-python -m streamlit run app.py
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe data/generate_flows.py
+.\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-Demo mode is on by default. Copy the example environment file as described below to see simulated costs at the example rates. The generator writes 20,000 synthetic records to `data/flows.csv`. The sidebar lets you select another CSV in `data/` or upload one.
+On macOS or Linux:
+
+```sh
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python data/generate_flows.py
+.venv/bin/python -m streamlit run app.py
+```
+
+Open <http://localhost:8501>. Demo mode is on by default. Copy the example environment file as described below to see simulated costs at the example rates. The generator writes 20,000 synthetic records to `data/flows.csv`. The sidebar lets you select another CSV or upload one. The dashboard shows firewall outcomes and recorded traffic, and **Capture details** shows traffic counts and available VLAN selectors.
 
 ## Configure live models
 
@@ -49,6 +59,8 @@ Every CSV record represents traffic observed as allowed. This is a single-rule, 
 
 ERP, Moodle, Printing, and DNS are treated as business-critical. A blocked record with at least 1,000,000 bytes also counts as potential breakage. Remaining blocks count as intended blocks. A service name in rule input resolves to a port, so ERP, Moodle, and HTTPS can all match TCP 443. The generated capture uses dedicated destinations for those applications.
 
+The suggested rule preserves the observed intended blocks. If a critical flow shares its destination, port, and protocol with an intended block, that combination remains blocked and the dashboard reports the conflict. Review the suggested rule against your firewall policy before use.
+
 | VLAN | CIDR |
 | --- | --- |
 | Admin | 10.10.0.0/24 |
@@ -80,11 +92,23 @@ Equivalent structured rule:
 }
 ```
 
-## Tests and benchmark
+## Test locally
+
+In the default demo, the dashboard should show 20,000 flows checked, 7,329 matched, 5,253 intended blocks, and 2,076 at-risk flows. The safer-rule replay should show zero at-risk flows and keep all 5,253 intended blocks.
+
+Run the automated suite in PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+$env:DEMO_MODE = "true"
+.\.venv\Scripts\python.exe benchmark.py
+```
+
+On macOS or Linux:
 
 ```sh
-python -m pytest -q
-python benchmark.py
+.venv/bin/python -m pytest -q
+DEMO_MODE=true .venv/bin/python benchmark.py
 ```
 
 The benchmark runs ten inputs through both paths and writes `benchmark_results.csv`. It compares the complete grouped keys and per-group counts to an independently specified replay rule. Elapsed time covers parsing, replay, explanation, and telemetry where applicable. The full-flow strategy sends the complete input CSV in live mode. Use synthetic data for that strategy. Provider errors, including context-window rejection, are recorded per case. The demo baseline returns canned findings based on the reference results, so its agreement is a wiring check. Use live mode for provider accuracy, actual token usage, and latency.

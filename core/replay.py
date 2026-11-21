@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import ipaddress
 from dataclasses import dataclass
+from pathlib import Path
+from typing import BinaryIO, TextIO
 
 import pandas as pd
 
@@ -43,17 +45,23 @@ def _rule_mask(addresses: pd.Series, frame: pd.DataFrame, target: str, ports: tu
 
 
 def _aggregate(flows: pd.DataFrame) -> pd.DataFrame:
+    totals = flows
+    if len(flows) and int(flows.bytes.max()) > (2**63 - 1) // len(flows):
+        totals = flows.assign(bytes=flows.bytes.astype(object))
     return (
-        flows.groupby(GROUPS, sort=True, dropna=False)
+        totals.groupby(GROUPS, sort=True, dropna=False)
         .agg(flow_count=("bytes", "size"), total_bytes=("bytes", "sum"))
         .reset_index()
         .sort_values("flow_count", ascending=False, kind="stable", ignore_index=True)
     )
 
 
-def load_flows(source) -> pd.DataFrame:
+def load_flows(source: str | Path | BinaryIO | TextIO) -> pd.DataFrame:
     """Read and validate the required columns in a NetFlow-style CSV."""
-    return _normalize(pd.read_csv(source, keep_default_na=False))
+    frame = _normalize(pd.read_csv(source, keep_default_na=False, dtype="string", encoding="utf-8-sig"))
+    _addresses(frame.src_ip)
+    _addresses(frame.dst_ip)
+    return frame
 
 
 def _normalize(flows: pd.DataFrame) -> pd.DataFrame:
@@ -61,12 +69,19 @@ def _normalize(flows: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing CSV columns: {', '.join(sorted(missing))}")
     frame = flows.loc[:, FIELDS].copy().reset_index(drop=True)
-    for name, low, high in (("dst_port", 0, 65535), ("bytes", 0, 2**63 - 1)):
-        values = pd.to_numeric(frame[name], errors="coerce")
-        if not (values.between(low, high) & values.mod(1).eq(0)).all():
-            raise ValueError(f"{name} must contain whole numbers between {low} and {high}.")
-        frame[name] = values.astype("int64")
-    for name in ("src_vlan", "dst_vlan", "app_label", "proto"):
+    for name, limit in (("dst_port", 65535), ("bytes", 2**63 - 1)):
+        raw = frame[name].astype("string").str.strip()
+        digits = raw.str.fullmatch(r"[0-9]+", na=False)
+        canonical = raw.str.lstrip("0").replace("", "0")
+        bound = str(limit)
+        length = canonical.str.len()
+        fits = length.lt(len(bound)) | (length.eq(len(bound)) & canonical.le(bound))
+        invalid = ~(digits & fits.fillna(False))
+        if invalid.any():
+            row = int(invalid[invalid].index[0]) + 1
+            raise ValueError(f"Flow record {row}: {name} must be a whole number between 0 and {limit}.")
+        frame[name] = canonical.astype("int64")
+    for name in ("src_ip", "dst_ip", "src_vlan", "dst_vlan", "app_label", "proto"):
         values = frame[name].astype("string").str.strip()
         if not values.fillna("").ne("").all():
             raise ValueError(f"{name} must contain a value for each flow.")

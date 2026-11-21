@@ -1,0 +1,44 @@
+.stApp { background: #f5f5f4; color: #292e32; }
+[data-testid="stHeader"] { background: #fff; border-bottom: 1px solid #e6e4e2; }
+[data-testid="stSidebar"] { background: #fff; border-right: 1px solid #e0ddda; }
+[data-testid="stSidebar"] [data-testid="stSidebarContent"] { padding-top: .4rem; }
+.stMainBlockContainer { max-width: 1480px; padding-top: 4.8rem; }
+.br-head {
+    background: #fff;
+    border: 1px solid #e4dfdb;
+    border-left: 4px solid #c54b22;
+    padding: .9rem 1.2rem 1rem;
+}
+.br-path { font-size: .8rem; color: #6d625e; margin-bottom: .3rem; }
+.br-head h1 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin: 0; padding: 0; line-height: 1.2; }
+.br-head p { margin: .4rem 0 0; color: #625a56; }
+.br-brand { display: flex; align-items: center; gap: .65rem; margin-bottom: .65rem; }
+.br-mark {
+    width: 1.9rem;
+    height: 1.9rem;
+    display: grid;
+    place-items: center;
+    border-radius: .3rem;
+    background: #b83b1c;
+    color: #fff;
+    font-weight: 750;
+}
+.br-brand strong { font-size: 1.22rem; }
+[data-testid="stMetric"] {
+    background: #fff;
+    border: 1px solid #e6d9d2;
+    border-radius: 3px;
+    padding: .65rem .85rem;
+}
+[data-testid="stMetricValue"] { font-size: 1.7rem; font-weight: 650; }
+div[data-testid="stVerticalBlockBorderWrapper"] { background: #fff; border-radius: 3px; border-color: #e6d9d2; }
+.br-widget {
+    border-bottom: 1px solid #bd502d;
+    color: #322e2c;
+    font-size: .95rem;
+    font-weight: 650;
+    padding: .05rem 0 .45rem;
+    text-align: center;
+}
+.stButton button[kind="primary"] { background: #b83b1c; border-color: #b83b1c; color: #fff; }
+.stButton button[kind="primary"]:hover { background: #963318; border-color: #963318; }

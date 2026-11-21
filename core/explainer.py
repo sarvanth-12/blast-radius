@@ -29,19 +29,30 @@ class Explanation:
     explanation: str
     safer_rule: Rule
     notice: str | None = None
+    shared_service_flows: int = 0
 
 
-def _local_rule(result: ReplayResult, rule: Rule) -> Rule:
-    """Derive host/service exceptions from critical records already on the device."""
-    broken = result.flows.loc[result.flows.category.eq("would_break")]
-    selectors = sorted(set(broken[["dst_ip", "dst_port", "proto"]].itertuples(index=False, name=None)))
+def _local_rule(result: ReplayResult, rule: Rule) -> tuple[Rule, int]:
+    """Restore only host/service combinations that preserve every intended block."""
+    fields = ["dst_ip", "dst_port", "proto"]
+    intended = result.flows.loc[result.flows.category.eq("intended_blocked"), fields]
+    broken = result.flows.loc[result.flows.category.eq("would_break"), fields]
+    intended_keys = {
+        (ipaddress.ip_address(ip), port, proto)
+        for ip, port, proto in intended.itertuples(index=False, name=None)
+    }
+    broken_keys = [
+        (ipaddress.ip_address(ip), port, proto)
+        for ip, port, proto in broken.itertuples(index=False, name=None)
+    ]
+    shared = sum(key in intended_keys for key in broken_keys)
+    selectors = sorted(set(broken_keys) - intended_keys, key=lambda key: (key[0].version, int(key[0]), key[1], key[2]))
     exceptions = []
-    for destination, port, proto in selectors:
+    for host, port, proto in selectors:
         if proto not in {"tcp", "udp"} or not port:
             continue
-        host = ipaddress.ip_address(destination)
         exceptions.append(ExceptionRule(f"{host}/{host.max_prefixlen}", (int(port),), proto))
-    return replace(rule, exceptions=tuple(dict.fromkeys((*rule.exceptions, *exceptions))))
+    return replace(rule, exceptions=tuple(dict.fromkeys((*rule.exceptions, *exceptions)))), shared
 
 
 def _offline(rows: list[dict], rule: Rule) -> dict:
@@ -91,7 +102,7 @@ def explain(rule: Rule, result: ReplayResult, llm: LLM) -> Explanation:
     if not rows:
         return Explanation(groups.assign(severity="", reason=""), "The replay flagged no broken flows.", rule)
 
-    local_rule = _local_rule(result, rule)
+    local_rule, shared = _local_rule(result, rule)
     notice = None
     try:
         raw = llm.complete(
@@ -122,4 +133,4 @@ def explain(rule: Rule, result: ReplayResult, llm: LLM) -> Explanation:
     if not notice and not llm.demo and safer != candidate:
         notice = "The suggested rule was refined locally using observed destination hosts."
     findings = pd.DataFrame(payload["groups"])
-    return Explanation(groups.merge(findings, on="id"), payload["explanation"], safer, notice)
+    return Explanation(groups.merge(findings, on="id"), payload["explanation"], safer, notice, shared)

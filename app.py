@@ -4,8 +4,10 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+from html import escape
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -13,6 +15,7 @@ from core.explainer import explain
 from core.llm import LLM, LLMError
 from core.parser import parse_rule
 from core.replay import ReplayResult, load_flows, replay
+from core.schema import VLANS
 from data.generate_flows import generate
 
 ROOT = Path(__file__).resolve().parent
@@ -27,51 +30,24 @@ st.set_page_config(page_title="Firewall impact | blast-radius", layout="wide")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
 
-def theme() -> None:
-    """Set an original, compact firewall-console visual style."""
-    st.markdown(
-        """
-        <style>
-        .stApp { background: #f7f8fa; color: #252b32; }
-        [data-testid="stHeader"] { background: #fff; border-bottom: 1px solid #e2e5e9; }
-        [data-testid="stSidebar"] { background: #eff1f4; border-right: 1px solid #dce1e7; }
-        [data-testid="stSidebar"] [data-testid="stHeading"] { color: #2a3138; }
-        .stMainBlockContainer { max-width: 1320px; padding-top: 4.4rem; }
-        .br-head { background: white; border: 1px solid #dfe3e8; border-top: 3px solid #dc532e;
-                   border-radius: 5px; padding: 1.25rem 1.4rem; margin-bottom: .4rem; }
-        .br-path { font-size: .78rem; color: #626b75; margin-bottom: .45rem; }
-        .br-head h1 { font-size: clamp(1.55rem, 3vw, 2.3rem); margin: 0; padding: 0; line-height: 1.2; }
-        .br-head p { margin: .45rem 0 0; color: #505b67; }
-        .br-brand { border-left: 4px solid #dc532e; padding-left: .65rem; margin-bottom: .5rem; }
-        .br-brand strong { font-size: 1.4rem; letter-spacing: -.035em; }
-        [data-testid="stMetric"] { background: #fff; border: 1px solid #dfe3e8;
-                                  border-radius: 5px; padding: .85rem 1rem; }
-        [data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: 650; }
-        div[data-testid="stVerticalBlockBorderWrapper"] { background: #fff; }
-        .stButton button[kind="primary"] { background: #b83b1c; border-color: #b83b1c; color: white; }
-        .stButton button[kind="primary"]:hover { background: #963318; border-color: #963318; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 @st.cache_data(show_spinner=False)
 def read_csv(content: bytes) -> pd.DataFrame:
     """Reuse the selected capture across button clicks."""
     return load_flows(io.BytesIO(content))
 
 
-def capture() -> tuple[pd.DataFrame, str]:
+def capture() -> tuple[pd.DataFrame, str, str, str]:
     with st.sidebar:
-        st.markdown('<div class="br-brand"><strong>blast-radius</strong></div>', unsafe_allow_html=True)
-        st.subheader("Flow capture")
-        paths = sorted((ROOT / "data").glob("*.csv"))
-        options = [path.name for path in paths] or ["flows.csv"]
-        name = st.selectbox("Local CSV", options)
-        uploaded = st.file_uploader("Or upload a flows CSV", type="csv")
+        st.markdown('<div class="br-brand"><span class="br-mark">B</span><strong>blast-radius</strong></div>', unsafe_allow_html=True)
+        page = st.radio("Navigation", ["Dashboard", "Capture details"], label_visibility="collapsed")
+        st.caption("Offline demo" if LLM().demo else "Live models")
+        with st.expander("Flow capture", expanded=True):
+            options = ["flows.csv", *sorted(path.name for path in (ROOT / "data").glob("*.csv") if path.name != "flows.csv")]
+            name = st.selectbox("Local CSV", options)
+            uploaded = st.file_uploader("Upload a flows CSV", type="csv")
         if uploaded:
             content = uploaded.getvalue()
+            name = uploaded.name
         else:
             path = ROOT / "data" / name
             if not path.exists():
@@ -81,8 +57,84 @@ def capture() -> tuple[pd.DataFrame, str]:
         st.metric("Total flows", f"{len(flows):,}")
         vlans = sorted(set(flows.src_vlan) | set(flows.dst_vlan))
         st.caption("VLANs · " + (", ".join(vlans) if vlans else "None"))
-        st.caption("Demo mode · no API calls" if LLM().demo else "Live model mode")
-    return flows, hashlib.sha256(content).hexdigest()
+    return flows, hashlib.sha256(content).hexdigest(), name, page
+
+
+def widget_title(title: str) -> None:
+    """Display a heading for a fixed dashboard widget."""
+    st.markdown(f'<h3 class="br-widget">{title}</h3>', unsafe_allow_html=True)
+
+
+def capture_details(flows: pd.DataFrame, name: str) -> None:
+    """Summarize observed VLANs alongside the simulator's named selectors."""
+    st.subheader("Capture details")
+    st.text(name)
+    incoming = flows.dst_vlan.value_counts()
+    outgoing = flows.src_vlan.value_counts()
+    counts = pd.concat([outgoing.rename("Source flows"), incoming.rename("Destination flows")], axis=1)
+    counts = counts.fillna(0).astype(int).rename_axis("VLAN").reset_index()
+    counts.insert(1, "Rule selector CIDR", counts.VLAN.map(VLANS).fillna("Use an explicit CIDR"))
+    st.dataframe(counts, hide_index=True, width="stretch")
+    st.caption("Named rule selectors use these CIDRs. The capture labels describe the observed traffic.")
+
+
+@st.cache_data(show_spinner=False)
+def traffic_series(flows: pd.DataFrame) -> pd.DataFrame:
+    """Roll up timestamped flows by UTC hour for the traffic widget."""
+    timestamps = pd.to_datetime(flows.timestamp, errors="coerce", utc=True, format="mixed")
+    valid = timestamps.notna()
+    traffic = pd.DataFrame({"hour": timestamps[valid].dt.floor("h"), "bytes": flows.loc[valid, "bytes"].astype(float)})
+    if traffic.empty:
+        return traffic
+    hourly = traffic.groupby("hour").bytes.sum()
+    span_hours = (hourly.index.max() - hourly.index.min()) / pd.Timedelta(hours=1)
+    interval = max(1, int(span_hours // 500) + 1)
+    totals = hourly.resample(f"{interval}h", origin="start").sum()
+    return totals.rename_axis("hour").reset_index().assign(interval_hours=interval)
+
+
+def dashboard_widgets(flows: pd.DataFrame, result: ReplayResult | None) -> None:
+    """Show a firewall outcome breakdown and an observed traffic timeline."""
+    firewall, traffic = st.columns((1, 1.65))
+    with firewall, st.container(border=True):
+        widget_title("Firewall outcomes")
+        if result is None:
+            st.caption("Run an analysis to see the firewall outcome breakdown.")
+        elif not result.summary["flows_checked"]:
+            st.caption("The selected capture has no flow records.")
+        else:
+            counts = result.summary
+            segments = {
+                "Allowed by rule or unaffected": counts["flows_checked"] - counts["intended_blocked"] - counts["would_break"] - counts["allowed_by_exception"],
+                "Intended blocked": counts["intended_blocked"],
+                "Would break": counts["would_break"],
+                "Allowed by exception": counts["allowed_by_exception"],
+            }
+            data = pd.DataFrame({"outcome": list(segments), "flows": list(segments.values())})
+            chart = alt.Chart(data).mark_arc(innerRadius=53, outerRadius=78).encode(
+                theta="flows:Q",
+                color=alt.Color("outcome:N", title=None, scale=alt.Scale(
+                    domain=list(segments), range=["#a9afad", "#af522d", "#c9312b", "#4d805b"],
+                ), legend=alt.Legend(orient="bottom", direction="vertical", columns=1)),
+                tooltip=[alt.Tooltip("outcome:N", title="Outcome"), alt.Tooltip("flows:Q", title="Flows", format=",")],
+            ).properties(height=188)
+            st.altair_chart(chart, width="stretch", theme=None)
+    with traffic, st.container(border=True):
+        widget_title("Observed traffic")
+        data = traffic_series(flows)
+        if data.empty:
+            st.caption("The capture has no readable timestamps.")
+        else:
+            data = data.assign(megabytes=data.bytes / 1_000_000)
+            chart = alt.Chart(data).mark_area(
+                color="#c85e39", opacity=.3, line={"color": "#a64424"},
+            ).encode(
+                x=alt.X("hour:T", title="Capture time (UTC)", scale=alt.Scale(type="utc")),
+                y=alt.Y("megabytes:Q", title=f"MB per {data.interval_hours.iat[0]} h"),
+                tooltip=[alt.Tooltip("hour:T", title="UTC time", timeUnit="utcyearmonthdatehours", format="%d %b %H:%M"),
+                         alt.Tooltip("megabytes:Q", title="MB", format=",.1f")],
+            ).properties(height=220)
+            st.altair_chart(chart, width="stretch", theme=None)
 
 
 def severity_style(value: str) -> str:
@@ -95,7 +147,7 @@ def flow_details(result: ReplayResult) -> None:
     if broken.empty:
         return
     with st.expander(f"Inspect {len(broken):,} individual broken flows"):
-        st.dataframe(broken, hide_index=True, use_container_width=True)
+        st.dataframe(broken, hide_index=True, width="stretch")
         st.download_button("Download broken flows CSV", broken.to_csv(index=False), "broken-flows.csv", "text/csv")
 
 
@@ -115,7 +167,7 @@ def stats(analysis: dict) -> None:
         st.write(f"{label} · **{rows:,} aggregate rows / {summary['flows_checked']:,} total flows**")
         st.caption("Raw flow rows sent: 0. Demo usage is simulated." if analysis["demo"] else "Raw flow rows sent: 0.")
         if analysis["calls"]:
-            st.dataframe(pd.DataFrame(analysis["calls"]), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(analysis["calls"]), hide_index=True, width="stretch")
 
 
 def results(flows: pd.DataFrame, analysis: dict) -> None:
@@ -131,7 +183,7 @@ def results(flows: pd.DataFrame, analysis: dict) -> None:
             st.success("No observed flows were classified as broken.")
         else:
             table = report.groups.drop(columns="id")
-            st.dataframe(table.style.map(severity_style, subset=["severity"]), hide_index=True, use_container_width=True)
+            st.dataframe(table.style.map(severity_style, subset=["severity"]), hide_index=True, width="stretch")
         flow_details(result)
         st.subheader("Impact explanation")
         st.write(report.explanation)
@@ -139,6 +191,11 @@ def results(flows: pd.DataFrame, analysis: dict) -> None:
         st.subheader("Suggested safer rule")
         if report.notice:
             st.info(report.notice)
+        if report.shared_service_flows:
+            st.warning(
+                f"{report.shared_service_flows:,} at-risk flows share a destination, port, and protocol "
+                "with traffic marked for blocking. The suggested rule keeps those blocks in place."
+            )
         st.json(report.safer_rule.to_dict())
         if st.button("Re-run with safer rule", disabled=report.safer_rule == rule):
             analysis["after"] = replay(flows, report.safer_rule).summary
@@ -149,26 +206,29 @@ def results(flows: pd.DataFrame, analysis: dict) -> None:
                  "Change": analysis["after"][key] - result.summary[key]}
                 for key, label in labels.items()
             ])
-            st.dataframe(comparison, hide_index=True, use_container_width=True)
+            st.dataframe(comparison, hide_index=True, width="stretch")
     stats(analysis)
 
 
 def main() -> None:
     """Render the dashboard and maintain analysis state for the selected capture."""
-    theme()
-    st.markdown(
-        '<div class="br-head"><div class="br-path">Firewall / Change analysis</div>'
-        '<h1>Firewall impact predictor</h1><p>Test a proposed rule against recent flows before applying it.</p></div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"<style>{(ROOT / 'dashboard.css').read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
     try:
-        flows, capture_key = capture()
+        flows, capture_key, name, page = capture()
     except (OSError, ValueError) as exc:
         st.error(f"Could not load the flow capture. {exc}")
         return
     if st.session_state.get("capture_key") != capture_key:
         st.session_state.pop("analysis", None)
         st.session_state.capture_key = capture_key
+    if page == "Capture details":
+        capture_details(flows, name)
+        return
+    st.markdown(
+        '<div class="br-head"><div class="br-path">Firewall / Dashboard</div>'
+        f'<h1>Firewall impact predictor</h1><p>{escape(name)} · {len(flows):,} observed flows</p></div>',
+        unsafe_allow_html=True,
+    )
     with st.container(border=True):
         with st.form("analysis_form"):
             text = st.text_area("Candidate firewall rule", value=DEFAULT_RULE, height=105, help="Enter plain English or paste a complete JSON rule.")
@@ -188,7 +248,11 @@ def main() -> None:
         except (ValueError, LLMError) as exc:
             st.error(str(exc))
     if "analysis" in st.session_state:
-        results(flows, st.session_state.analysis)
+        analysis = st.session_state.analysis
+        dashboard_widgets(flows, analysis["result"])
+        results(flows, analysis)
+    else:
+        dashboard_widgets(flows, None)
 
 
 if __name__ == "__main__":
