@@ -111,14 +111,21 @@ def dashboard_widgets(flows: pd.DataFrame, result: ReplayResult | None) -> None:
                 "Allowed by exception": counts["allowed_by_exception"],
             }
             data = pd.DataFrame({"outcome": list(segments), "flows": list(segments.values())})
+            colors = ["#a9afad", "#af522d", "#c9312b", "#4d805b"]
             chart = alt.Chart(data).mark_arc(innerRadius=53, outerRadius=78).encode(
                 theta="flows:Q",
                 color=alt.Color("outcome:N", title=None, scale=alt.Scale(
-                    domain=list(segments), range=["#a9afad", "#af522d", "#c9312b", "#4d805b"],
-                ), legend=alt.Legend(orient="bottom", direction="vertical", columns=1)),
+                    domain=list(segments), range=colors,
+                ), legend=None),
                 tooltip=[alt.Tooltip("outcome:N", title="Outcome"), alt.Tooltip("flows:Q", title="Flows", format=",")],
-            ).properties(height=188)
+            ).properties(height=192, background="transparent").configure_view(stroke=None)
             st.altair_chart(chart, width="stretch", theme=None)
+            legend = "".join(
+                f'<li><span style="background:{color}" aria-hidden="true"></span>{escape(label)}</li>'
+                for label, color in zip(segments, colors)
+            )
+            st.markdown(f'<ul class="br-outcome-legend" aria-label="Firewall outcome colors">{legend}</ul>',
+                        unsafe_allow_html=True)
     with traffic, st.container(border=True):
         widget_title("Observed traffic")
         data = traffic_series(flows)

@@ -40,5 +40,17 @@ div[data-testid="stVerticalBlockBorderWrapper"] { background: #fff; border-radiu
     padding: .05rem 0 .45rem;
     text-align: center;
 }
+.br-outcome-legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), max-content));
+    justify-content: center;
+    gap: .25rem .9rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: .75rem;
+}
+.br-outcome-legend li { display: flex; align-items: center; gap: .35rem; }
+.br-outcome-legend li span { width: .6rem; height: .6rem; flex: 0 0 .6rem; border-radius: 50%; }
 .stButton button[kind="primary"] { background: #b83b1c; border-color: #b83b1c; color: #fff; }
 .stButton button[kind="primary"]:hover { background: #963318; border-color: #963318; }
