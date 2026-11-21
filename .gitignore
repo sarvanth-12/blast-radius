@@ -1,0 +1,7 @@
+/.env
+/.venv/
+/data/flows.csv
+/benchmark_results.csv
+__pycache__/
+.pytest_cache/
+*.py[cod]
