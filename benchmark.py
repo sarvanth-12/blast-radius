@@ -81,30 +81,28 @@ def benchmark(flows: pd.DataFrame) -> pd.DataFrame:
         for strategy in ("routed", "all_flows"):
             llm = LLM()
             start = perf_counter()
-            row_count = 0
             prediction = None
             error = ""
             try:
                 if strategy == "routed":
                     parsed = parse_rule(text, llm)
                     result = replay(flows, parsed)
-                    row_count = len(result.would_break)
                     report = explain(parsed, result, llm)
                     prediction = findings(result.would_break)
                     if report.notice and report.notice.startswith("Local explanation"):
                         error = report.notice
                 else:
-                    row_count = len(flows)
                     raw = llm.complete(
                         "strong", BASELINE_SYSTEM, f"Requested rule: {text}\n\nFull CSV:\n{raw_csv}",
                         lambda: {"groups": truth[FINDING_FIELDS].to_dict(orient="records")},
+                        flow_rows=len(flows),
                     )
                     prediction = decode_baseline(raw)
             except (LLMError, ValueError) as exc:
                 error = str(exc)
             records.append({
                 "case": index, "rule": text, "strategy": strategy, "mode": "demo" if llm.demo else "live",
-                "flow_rows_in_prompt": row_count, "total_flows": len(flows),
+                "total_flows": len(flows),
                 "elapsed_ms": round((perf_counter() - start) * 1000, 3),
                 **llm.totals(),
                 "expected_broken_flows": sum(expected.values()),
@@ -126,7 +124,7 @@ def main() -> None:
     results = benchmark(load_flows(args.flows))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(args.output, index=False)
-    print(results[["case", "strategy", "mode", "flow_rows_in_prompt", "elapsed_ms",
+    print(results[["case", "strategy", "mode", "flow_rows_in_request", "elapsed_ms",
                    "estimated_cost", "findings_match", "error"]].to_string(index=False))
     if results["mode"].eq("demo").all():
         print("Demo mode uses estimated tokens, local timings and canned baseline findings. "
