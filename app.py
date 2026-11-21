@@ -23,7 +23,7 @@ CARDS = {
 }
 PALETTES = {"critical": ("#8f271b", "#fce8e3"), "review": ("#704407", "#fff0cc"), "ok": ("#1c6039", "#dcf2e3")}
 
-st.set_page_config(page_title="Firewall impact | blast-radius", page_icon="BR", layout="wide")
+st.set_page_config(page_title="Firewall impact | blast-radius", layout="wide")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
 
@@ -100,8 +100,7 @@ def flow_details(result: ReplayResult) -> None:
 
 
 def stats(analysis: dict) -> None:
-    llm = analysis["llm"]
-    totals = llm.totals()
+    totals = analysis["usage"]
     with st.expander("LLM usage and traffic"):
         prompt, completion = totals["prompt_tokens"], totals["completion_tokens"]
         cost, latency = totals["estimated_cost"], totals["llm_latency_ms"]
@@ -111,11 +110,12 @@ def stats(analysis: dict) -> None:
         third.metric("Estimated cost", f"{cost:.6f} credits" if cost is not None else "Unknown")
         st.write(f"Prompt tokens · {prompt if prompt is not None else 'Unknown'}  |  Completion tokens · {completion if completion is not None else 'Unknown'}")
         summary = analysis["result"].summary
-        rows = analysis["sent"]
-        st.write(f"Flow rows sent to LLM · **{rows:,} aggregate rows / {summary['flows_checked']:,} total flows**")
-        st.caption("Raw flow rows sent: 0. Demo usage is simulated." if llm.demo else "Raw flow rows sent: 0.")
-        if llm.calls:
-            st.dataframe(pd.DataFrame(llm.calls), hide_index=True, use_container_width=True)
+        rows = totals["flow_rows_in_request"]
+        label = "Simulated flow rows in LLM requests" if analysis["demo"] else "Flow rows in LLM requests"
+        st.write(f"{label} · **{rows:,} aggregate rows / {summary['flows_checked']:,} total flows**")
+        st.caption("Raw flow rows sent: 0. Demo usage is simulated." if analysis["demo"] else "Raw flow rows sent: 0.")
+        if analysis["calls"]:
+            st.dataframe(pd.DataFrame(analysis["calls"]), hide_index=True, use_container_width=True)
 
 
 def results(flows: pd.DataFrame, analysis: dict) -> None:
@@ -182,8 +182,8 @@ def main() -> None:
                 result = replay(flows, rule)
                 report = explain(rule, result, llm)
             st.session_state.analysis = {
-                "rule": rule, "result": result, "report": report, "llm": llm,
-                "sent": len(result.would_break),
+                "rule": rule, "result": result, "report": report,
+                "usage": llm.totals(), "calls": llm.calls, "demo": llm.demo,
             }
         except (ValueError, LLMError) as exc:
             st.error(str(exc))
