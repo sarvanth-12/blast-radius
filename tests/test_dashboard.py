@@ -23,7 +23,8 @@ def test_dashboard_replays_rule_and_compares_suggestion(tmp_path: Path, monkeypa
     before = app.session_state.analysis["result"].summary
     assert before["flows_checked"] == 200
     assert before["would_break"] > 0 and before["intended_blocked"] > 0
-    assert len(app.get("arrow_vega_lite_chart")) == 2
+    assert any("Firewall outcomes" in item.value for item in app.markdown)
+    assert any("Observed traffic" in item.value for item in app.markdown)
 
     next(button for button in app.button if button.label == "Re-run with safer rule").click().run()
     assert not app.exception
