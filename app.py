@@ -87,7 +87,7 @@ def traffic_series(flows: pd.DataFrame) -> pd.DataFrame:
     if traffic.empty:
         return traffic
     hourly = traffic.groupby("hour").bytes.sum()
-    span_hours = (hourly.index.max() - hourly.index.min()) / pd.Timedelta(hours=1)
+    span_hours = (hourly.index.max() - hourly.index.min()).total_seconds() / 3600.0
     interval = max(1, int(span_hours // 500) + 1)
     totals = hourly.resample(f"{interval}h", origin="start").sum()
     return totals.rename_axis("hour").reset_index().assign(interval_hours=interval)

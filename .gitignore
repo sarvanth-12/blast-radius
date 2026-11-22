@@ -1,7 +1,30 @@
-/.env
-/.venv/
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Data & Output Artifacts
 /data/flows.csv
 /benchmark_results.csv
-__pycache__/
-.pytest_cache/
-*.py[cod]
+*.log
+
+# IDE & OS Files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
